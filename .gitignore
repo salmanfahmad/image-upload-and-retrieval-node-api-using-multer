@@ -128,3 +128,12 @@ dist
 .yarn/build-state.yml
 .yarn/install-state.gz
 .pnp.*
+
+# Images in uploads
+uploads/*
+
+# package-lock.json
+package-lock.json
+
+# .DS_Store
+.DS_Store
