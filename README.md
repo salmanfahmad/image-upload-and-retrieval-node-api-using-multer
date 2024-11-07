@@ -17,12 +17,12 @@ This project is a Node.js API that allows users to upload images to the server a
 
 1. Clone the repository:
     ```bash
-    git clone https://github.com/yourusername/node-file-upload-api.git
+    git clone https://github.com/salmanfahmad/image-upload-and-retrieval-node-api-using-multer.git
     ```
 
 2. Navigate to the project directory:
     ```bash
-    cd node-file-upload-api
+    cd image-upload-and-retrieval-node-api-using-multer
     ```
 
 3. Install the dependencies:
