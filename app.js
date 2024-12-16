@@ -35,12 +35,15 @@ const storage = multer.diskStorage({
 const fileFilter = (req, file, cb) => {
   const allowedImageTypes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
   const allowedVideoTypes = ['video/mp4', 'video/mpeg', 'video/quicktime', 'video/x-msvideo'];
+  const allowedDocumentTypes = ['application/pdf'];
 
   // Check if the file type is allowed
-  if (allowedImageTypes.includes(file.mimetype) || allowedVideoTypes.includes(file.mimetype)) {
+  if (allowedImageTypes.includes(file.mimetype) ||
+    allowedVideoTypes.includes(file.mimetype) ||
+    allowedDocumentTypes.includes(file.mimetype)) {
     cb(null, true);
   } else {
-    cb(new Error('Invalid file type. Only JPEG, PNG, GIF, WEBP, MP4, MPEG, MOV, and AVI files are allowed.'), false);
+    cb(new Error('Invalid file type. Only JPEG, PNG, GIF, WEBP, MP4, MPEG, MOV, AVI, and PDF files are allowed.'), false);
   }
 };
 
@@ -53,7 +56,7 @@ const fileSizeChecker = (req, res, next) => {
           const actualSize = parseInt(req.headers['content-length']) || 0;
           return res.status(400).json({
             success: false,
-            message: `File size (${formatFileSize(actualSize)}) exceeds the limit (10MB for images, 15MB for videos)`,
+            message: `File size (${formatFileSize(actualSize)}) exceeds the limit (10MB for images, 15MB for videos/PDFs)`,
             actualSize: actualSize,
             formattedSize: formatFileSize(actualSize),
             maxSize: 15 * 1024 * 1024,
@@ -78,7 +81,7 @@ const fileSizeChecker = (req, res, next) => {
 const upload = multer({
   storage: storage,
   limits: {
-    fileSize: 15 * 1024 * 1024 // Setting max limit to 15MB (for videos)
+    fileSize: 15 * 1024 * 1024 // Setting max limit to 15MB (for videos and PDFs)
   },
   fileFilter: fileFilter
 });
@@ -119,16 +122,21 @@ app.post('/upload', fileSizeChecker(), validateFileSize, (req, res) => {
   const filename = req.file.filename;
   const fileUrl = `${protocol}://${host}/uploads/${filename}`;
   const isVideo = req.file.mimetype.startsWith('video/');
+  const isPDF = req.file.mimetype === 'application/pdf';
+
+  let fileType = 'image';
+  if (isVideo) fileType = 'video';
+  if (isPDF) fileType = 'pdf';
 
   return res.status(201).json({
     success: true,
-    message: `${isVideo ? 'Video' : 'Image'} uploaded successfully`,
+    message: `${fileType.charAt(0).toUpperCase() + fileType.slice(1)} uploaded successfully`,
     filename: filename,
     path: fileUrl,
     size: req.file.size,
     formattedSize: formatFileSize(req.file.size),
     mimetype: req.file.mimetype,
-    type: isVideo ? 'video' : 'image'
+    type: fileType
   });
 });
 
