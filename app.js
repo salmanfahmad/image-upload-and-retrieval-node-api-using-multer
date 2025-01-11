@@ -57,12 +57,15 @@ const fileFilter = (req, file, cb) => {
   }
 };
 
-// Custom multer middleware with dynamic file size limits
+// Multer upload configuration
 const upload = multer({
   storage: storage,
   fileFilter: fileFilter,
-  limits: { fileSize: Infinity } // Remove the initial file size limit
-}).single('file');
+  limits: { fileSize: Infinity }
+}).fields([
+  { name: 'file', maxCount: 1 },
+  { name: 'image', maxCount: 1 }
+]);
 
 // Size validation middleware
 const validateFileSize = (req, res, next) => {
@@ -79,7 +82,10 @@ const validateFileSize = (req, res, next) => {
       });
     }
 
-    if (!req.file) {
+    // Get the uploaded file from either field
+    const uploadedFile = req.files?.file?.[0] || req.files?.image?.[0];
+
+    if (!uploadedFile) {
       return res.status(400).json({
         success: false,
         message: 'No file uploaded'
@@ -87,19 +93,19 @@ const validateFileSize = (req, res, next) => {
     }
 
     // Skip size validation for APK files
-    if (isAPKFile(req.file)) {
+    if (isAPKFile(uploadedFile)) {
       return next();
     }
 
-    const fileSize = req.file.size;
-    const isImage = req.file.mimetype.startsWith('image/');
+    const fileSize = uploadedFile.size;
+    const isImage = uploadedFile.mimetype.startsWith('image/');
     const maxImageSize = 10 * 1024 * 1024; // 10MB for images
     const maxOtherSize = 15 * 1024 * 1024; // 15MB for videos/PDFs
 
     // Check size limits
     if ((isImage && fileSize > maxImageSize) || (!isImage && fileSize > maxOtherSize)) {
       // Delete the file that exceeded the limit
-      fs.unlinkSync(req.file.path);
+      fs.unlinkSync(uploadedFile.path);
 
       const limit = isImage ? maxImageSize : maxOtherSize;
       return res.status(400).json({
@@ -120,23 +126,27 @@ const validateFileSize = (req, res, next) => {
 app.post('/upload', validateFileSize, (req, res) => {
   const protocol = req.protocol;
   const host = req.get('host');
-  const filename = req.file.filename;
+
+  // Get the uploaded file from either field
+  const uploadedFile = req.files?.file?.[0] || req.files?.image?.[0];
+  const filename = uploadedFile.filename;
   const fileUrl = `${protocol}://${host}/uploads/${filename}`;
 
   let fileType = 'image';
-  if (req.file.mimetype.startsWith('video/')) fileType = 'video';
-  if (req.file.mimetype === 'application/pdf') fileType = 'pdf';
-  if (isAPKFile(req.file)) fileType = 'apk';
+  if (uploadedFile.mimetype.startsWith('video/')) fileType = 'video';
+  if (uploadedFile.mimetype === 'application/pdf') fileType = 'pdf';
+  if (isAPKFile(uploadedFile)) fileType = 'apk';
 
   return res.status(201).json({
     success: true,
     message: `${fileType.charAt(0).toUpperCase() + fileType.slice(1)} uploaded successfully`,
     filename: filename,
     path: fileUrl,
-    size: req.file.size,
-    formattedSize: formatFileSize(req.file.size),
-    mimetype: req.file.mimetype,
-    type: fileType
+    size: uploadedFile.size,
+    formattedSize: formatFileSize(uploadedFile.size),
+    mimetype: uploadedFile.mimetype,
+    type: fileType,
+    field: req.files?.file ? 'file' : 'image'
   });
 });
 
@@ -198,6 +208,16 @@ app.post('/delete', (req, res) => {
       error: error.message
     });
   }
+});
+
+// Error handling middleware
+app.use((err, req, res, next) => {
+  console.error(err.stack);
+  res.status(500).json({
+    success: false,
+    message: 'Something broke!',
+    error: err.message
+  });
 });
 
 // Start the server
