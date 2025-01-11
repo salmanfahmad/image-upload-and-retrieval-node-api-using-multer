@@ -5,6 +5,9 @@ const fs = require('fs');
 
 const app = express();
 
+// Parse JSON bodies
+app.use(express.json());
+
 // Create uploads directory if it doesn't exist
 const uploadPath = path.join(__dirname, 'uploads');
 if (!fs.existsSync(uploadPath)) {
@@ -36,14 +39,17 @@ const fileFilter = (req, file, cb) => {
   const allowedImageTypes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
   const allowedVideoTypes = ['video/mp4', 'video/mpeg', 'video/quicktime', 'video/x-msvideo'];
   const allowedDocumentTypes = ['application/pdf'];
+  const allowedAppTypes = ['application/vnd.android.package-archive'];
 
   // Check if the file type is allowed
   if (allowedImageTypes.includes(file.mimetype) ||
     allowedVideoTypes.includes(file.mimetype) ||
-    allowedDocumentTypes.includes(file.mimetype)) {
+    allowedDocumentTypes.includes(file.mimetype) ||
+    allowedAppTypes.includes(file.mimetype) ||
+    file.originalname.endsWith('.apk')) {
     cb(null, true);
   } else {
-    cb(new Error('Invalid file type. Only JPEG, PNG, GIF, WEBP, MP4, MPEG, MOV, AVI, and PDF files are allowed.'), false);
+    cb(new Error('Invalid file type. Only JPEG, PNG, GIF, WEBP, MP4, MPEG, MOV, AVI, PDF, and APK files are allowed.'), false);
   }
 };
 
@@ -96,8 +102,14 @@ const validateFileSize = (req, res, next) => {
   }
 
   const isImage = req.file.mimetype.startsWith('image/');
+  const isAPK = req.file.mimetype === 'application/vnd.android.package-archive' ||
+    req.file.originalname.endsWith('.apk');
   const fileSize = req.file.size;
   const maxImageSize = 10 * 1024 * 1024; // 10MB for images
+
+  if (isAPK) {
+    return next();
+  }
 
   if (isImage && fileSize > maxImageSize) {
     // Delete the file that exceeded the limit
@@ -123,10 +135,13 @@ app.post('/upload', fileSizeChecker(), validateFileSize, (req, res) => {
   const fileUrl = `${protocol}://${host}/uploads/${filename}`;
   const isVideo = req.file.mimetype.startsWith('video/');
   const isPDF = req.file.mimetype === 'application/pdf';
+  const isAPK = req.file.mimetype === 'application/vnd.android.package-archive' ||
+    req.file.originalname.endsWith('.apk');
 
   let fileType = 'image';
   if (isVideo) fileType = 'video';
   if (isPDF) fileType = 'pdf';
+  if (isAPK) fileType = 'apk';
 
   return res.status(201).json({
     success: true,
@@ -158,6 +173,43 @@ app.get('/uploads/:filename', (req, res) => {
     return res.status(500).json({
       success: false,
       message: 'Error retrieving file',
+      error: error.message
+    });
+  }
+});
+
+// API endpoint to delete uploaded files
+app.post('/delete', (req, res) => {
+  try {
+    const { filename } = req.body;
+
+    if (!filename) {
+      return res.status(400).json({
+        success: false,
+        message: 'Filename is required in request body'
+      });
+    }
+
+    const filePath = path.join(__dirname, 'uploads', filename);
+
+    if (!fs.existsSync(filePath)) {
+      return res.status(404).json({
+        success: false,
+        message: 'File not found'
+      });
+    }
+
+    fs.unlinkSync(filePath);
+
+    return res.status(200).json({
+      success: true,
+      message: 'File deleted successfully',
+      filename: filename
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: 'Error deleting file',
       error: error.message
     });
   }
