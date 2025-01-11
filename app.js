@@ -23,7 +23,7 @@ const formatFileSize = (bytes) => {
   return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
 };
 
-// Multer configuration with file size limit and destination
+// Multer configuration
 const storage = multer.diskStorage({
   destination: function (req, file, cb) {
     cb(null, uploadPath);
@@ -34,114 +34,99 @@ const storage = multer.diskStorage({
   }
 });
 
-// File filter to validate file types and size limits
+// Check if file is APK
+const isAPKFile = (file) => {
+  return file.mimetype === 'application/vnd.android.package-archive' ||
+    file.originalname.toLowerCase().endsWith('.apk');
+};
+
+// File filter to validate file types
 const fileFilter = (req, file, cb) => {
   const allowedImageTypes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
   const allowedVideoTypes = ['video/mp4', 'video/mpeg', 'video/quicktime', 'video/x-msvideo'];
   const allowedDocumentTypes = ['application/pdf'];
-  const allowedAppTypes = ['application/vnd.android.package-archive'];
 
-  // Check if the file type is allowed
-  if (allowedImageTypes.includes(file.mimetype) ||
+  // Check if file is APK or other allowed type
+  if (isAPKFile(file) ||
+    allowedImageTypes.includes(file.mimetype) ||
     allowedVideoTypes.includes(file.mimetype) ||
-    allowedDocumentTypes.includes(file.mimetype) ||
-    allowedAppTypes.includes(file.mimetype) ||
-    file.originalname.endsWith('.apk')) {
+    allowedDocumentTypes.includes(file.mimetype)) {
     cb(null, true);
   } else {
     cb(new Error('Invalid file type. Only JPEG, PNG, GIF, WEBP, MP4, MPEG, MOV, AVI, PDF, and APK files are allowed.'), false);
   }
 };
 
-// Custom file size checker middleware
-const fileSizeChecker = (req, res, next) => {
-  return (req, res, next) => {
-    upload.single('file')(req, res, (err) => {
-      if (err instanceof multer.MulterError) {
-        if (err.code === 'LIMIT_FILE_SIZE') {
-          const actualSize = parseInt(req.headers['content-length']) || 0;
-          return res.status(400).json({
-            success: false,
-            message: `File size (${formatFileSize(actualSize)}) exceeds the limit (10MB for images, 15MB for videos/PDFs)`,
-            actualSize: actualSize,
-            formattedSize: formatFileSize(actualSize),
-            maxSize: 15 * 1024 * 1024,
-            formattedMaxSize: formatFileSize(15 * 1024 * 1024)
-          });
-        }
-        return res.status(400).json({
-          success: false,
-          message: `Upload error: ${err.message}`
-        });
-      } else if (err) {
-        return res.status(400).json({
-          success: false,
-          message: err.message
-        });
-      }
-      next();
-    });
-  };
-};
-
+// Custom multer middleware with dynamic file size limits
 const upload = multer({
   storage: storage,
-  limits: {
-    fileSize: 15 * 1024 * 1024 // Setting max limit to 15MB (for videos and PDFs)
-  },
-  fileFilter: fileFilter
-});
+  fileFilter: fileFilter,
+  limits: { fileSize: Infinity } // Remove the initial file size limit
+}).single('file');
 
 // Size validation middleware
 const validateFileSize = (req, res, next) => {
-  if (!req.file) {
-    return res.status(400).json({
-      success: false,
-      message: 'No file uploaded'
-    });
-  }
+  upload(req, res, (err) => {
+    if (err instanceof multer.MulterError) {
+      return res.status(400).json({
+        success: false,
+        message: `Upload error: ${err.message}`
+      });
+    } else if (err) {
+      return res.status(400).json({
+        success: false,
+        message: err.message
+      });
+    }
 
-  const isImage = req.file.mimetype.startsWith('image/');
-  const isAPK = req.file.mimetype === 'application/vnd.android.package-archive' ||
-    req.file.originalname.endsWith('.apk');
-  const fileSize = req.file.size;
-  const maxImageSize = 10 * 1024 * 1024; // 10MB for images
+    if (!req.file) {
+      return res.status(400).json({
+        success: false,
+        message: 'No file uploaded'
+      });
+    }
 
-  if (isAPK) {
-    return next();
-  }
+    // Skip size validation for APK files
+    if (isAPKFile(req.file)) {
+      return next();
+    }
 
-  if (isImage && fileSize > maxImageSize) {
-    // Delete the file that exceeded the limit
-    fs.unlinkSync(req.file.path);
-    return res.status(400).json({
-      success: false,
-      message: `Image size (${formatFileSize(fileSize)}) exceeds the 10MB limit`,
-      actualSize: fileSize,
-      formattedSize: formatFileSize(fileSize),
-      maxSize: maxImageSize,
-      formattedMaxSize: formatFileSize(maxImageSize)
-    });
-  }
+    const fileSize = req.file.size;
+    const isImage = req.file.mimetype.startsWith('image/');
+    const maxImageSize = 10 * 1024 * 1024; // 10MB for images
+    const maxOtherSize = 15 * 1024 * 1024; // 15MB for videos/PDFs
 
-  next();
+    // Check size limits
+    if ((isImage && fileSize > maxImageSize) || (!isImage && fileSize > maxOtherSize)) {
+      // Delete the file that exceeded the limit
+      fs.unlinkSync(req.file.path);
+
+      const limit = isImage ? maxImageSize : maxOtherSize;
+      return res.status(400).json({
+        success: false,
+        message: `File size (${formatFileSize(fileSize)}) exceeds the limit (${formatFileSize(limit)})`,
+        actualSize: fileSize,
+        formattedSize: formatFileSize(fileSize),
+        maxSize: limit,
+        formattedMaxSize: formatFileSize(limit)
+      });
+    }
+
+    next();
+  });
 };
 
 // API endpoint to handle file uploads
-app.post('/upload', fileSizeChecker(), validateFileSize, (req, res) => {
+app.post('/upload', validateFileSize, (req, res) => {
   const protocol = req.protocol;
   const host = req.get('host');
   const filename = req.file.filename;
   const fileUrl = `${protocol}://${host}/uploads/${filename}`;
-  const isVideo = req.file.mimetype.startsWith('video/');
-  const isPDF = req.file.mimetype === 'application/pdf';
-  const isAPK = req.file.mimetype === 'application/vnd.android.package-archive' ||
-    req.file.originalname.endsWith('.apk');
 
   let fileType = 'image';
-  if (isVideo) fileType = 'video';
-  if (isPDF) fileType = 'pdf';
-  if (isAPK) fileType = 'apk';
+  if (req.file.mimetype.startsWith('video/')) fileType = 'video';
+  if (req.file.mimetype === 'application/pdf') fileType = 'pdf';
+  if (isAPKFile(req.file)) fileType = 'apk';
 
   return res.status(201).json({
     success: true,
@@ -219,7 +204,4 @@ app.post('/delete', (req, res) => {
 const PORT = process.env.PORT || 8009;
 app.listen(PORT, () => {
   console.log(`Server is running on http://localhost:${PORT}`);
-  // console.log(`Image size limit: ${formatFileSize(10 * 1024 * 1024)}`);
-  // console.log(`Video size limit: ${formatFileSize(15 * 1024 * 1024)}`);
-  // console.log(`Uploads directory: ${uploadPath}`);
 });
